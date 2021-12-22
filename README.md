@@ -78,20 +78,20 @@ resource "kubernetes_cron_job_v1" "postgresql_backup" {
             container {
               name            = "pgdump-gcs-cron"
               image           = "openrm/pgdump-gcs:latest"
-              env = {
-                name = PGDATABASE
+              env {
+                name = "PGDATABASE"
                 value = postgresql_database
               }
-              env = {
-                name = PGHOST
+              env {
+                name = "PGHOST"
                 value = postgresql_host
               }
-              env = {
-                name = PGPORT
+              env {
+                name = "PGPORT"
                 value = postgresql_port
               }
-              env = {
-                name = PGUSER
+              env {
+                name = "PGUSER"
                 value_from {
                   secret_key_ref {
                     name = "postgresql"
@@ -99,8 +99,8 @@ resource "kubernetes_cron_job_v1" "postgresql_backup" {
                   }
                 }
               }
-              env = {
-                name = PGPASS
+              env {
+                name = "PGPASS"
                 value_from {
                   secret_key_ref {
                     name = "postgresql"
@@ -108,8 +108,8 @@ resource "kubernetes_cron_job_v1" "postgresql_backup" {
                   }
                 }
               }
-              env = {
-                name = GCS_BUCKET
+              env {
+                name = "GCS_BUCKET"
                 value = "backup_bucket_name"
               }
             }
