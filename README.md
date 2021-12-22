@@ -1,7 +1,7 @@
 # docker-pgdump-gcs
-A simple Docker container to perform a `pg_dump` command and upload the archive file to GCS.
+A simple Docker container to perform a `pg_dump` command and upload the archive file to GCS. You can specify env variables used by the `pg_dump` to customize the execution (`PGDATABASE`, `PGHOST`, `PGPORT`, etc.).
 
-This container is meant to be used as a cronjob with Kubernetes.
+This container is meant to be used as a cronjob with Kubernetes, and it will simply dump the data as a plain SQL file with compression enabled.
 
 The service account running the container needs to have write access to the destination bucket, as this container makes use of `gsutil`.
 
@@ -41,11 +41,22 @@ spec:
             image: openrm/pgdump-gcs:latest
             imagePullPolicy: IfNotPresent
             env:
-            - name: POSTGRESQL_URI
+            - name: PGDATABASE
+              value: "postgresql_database"
+            - name: PGHOST
+              value: "postgresql_host"
+            - name: PGPORT
+              value: "postgresql_port"
+            - name: PGUSER
               valueFrom:
                 secretKeyRef:
                   name: postgresql
-                  key: uri
+                  key: user
+            - name: PGPASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql
+                  key: password
             - name: GCS_BUCKET
               value: "backup_bucket_name"
 ```
@@ -68,17 +79,38 @@ resource "kubernetes_cron_job_v1" "postgresql_backup" {
               name            = "pgdump-gcs-cron"
               image           = "openrm/pgdump-gcs:latest"
               env = {
-                name = GCS_BUCKET
-                value = "backup_bucket_name"
+                name = PGDATABASE
+                value = postgresql_database
               }
               env = {
-                name = POSTGRESQL_URI
+                name = PGHOST
+                value = postgresql_host
+              }
+              env = {
+                name = PGPORT
+                value = postgresql_port
+              }
+              env = {
+                name = PGUSER
                 value_from {
                   secret_key_ref {
                     name = "postgresql"
-                    key  = "uri"
+                    key  = "user"
                   }
                 }
+              }
+              env = {
+                name = PGPASS
+                value_from {
+                  secret_key_ref {
+                    name = "postgresql"
+                    key  = "password"
+                  }
+                }
+              }
+              env = {
+                name = GCS_BUCKET
+                value = "backup_bucket_name"
               }
             }
           }
