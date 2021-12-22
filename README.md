@@ -1,12 +1,12 @@
 # docker-mongodump-gcs
-A simple Docker container to perform a mongo_dump and upload the file content to GCS
+A simple Docker container to perform a `mongodump` command and upload the archive file to GCS.
 
-This container is meant to be used as a cronjob with Kubernetes, to access a MongoDB insrance accessible from the GKE node this pod is running, and upload the backup to an accessible bucket.
+This container is meant to be used as a cronjob with Kubernetes.
 
 The service account running the container needs to have write access to the destination bucket, as this container makes use of `gsutil`.
 
 # Volumes
-You can mount a volume on `/backups` if you want to collect the intermediate archives.
+You can mount a volume on `/backups` if you want to collect the intermediate archives, or give more space to your container for the backup process.
 
 # Cron Schedule Syntax
 
