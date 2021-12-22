@@ -1,5 +1,5 @@
-# docker-mongodump-gcs
-A simple Docker container to perform a `mongodump` command and upload the archive file to GCS.
+# docker-pgdump-gcs
+A simple Docker container to perform a `pg_dump` command and upload the archive file to GCS.
 
 This container is meant to be used as a cronjob with Kubernetes.
 
@@ -29,7 +29,7 @@ Please refer to https://kubernetes.io/docs/concepts/workloads/controllers/cron-j
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: mongodb-backup
+  name: postgresql-backup
 spec:
   schedule: "0 */6 * * *"
   jobTemplate:
@@ -37,14 +37,14 @@ spec:
       template:
         spec:
           containers:
-          - name: mongodump-gcs-cron
-            image: openrm/mongodump-gcs:latest
+          - name: pgdump-gcs-cron
+            image: openrm/pgdump-gcs:latest
             imagePullPolicy: IfNotPresent
             env:
-            - name: MONGO_URI
+            - name: POSTGRESQL_URI
               valueFrom:
                 secretKeyRef:
-                  name: mongodb
+                  name: postgresql
                   key: uri
             - name: GCS_BUCKET
               value: "backup_bucket_name"
@@ -54,9 +54,9 @@ In this simple example, the cron is started every 6 hours.
 ## Terraform
 ```tf
 
-resource "kubernetes_cron_job_v1" "mongodb_backup" {
+resource "kubernetes_cron_job_v1" "postgresql_backup" {
   metadata {
-    name = "mongodb-backup"
+    name = "postgresql-backup"
   }
   spec {
     schedule                  = "0 */6 * * *"
@@ -65,17 +65,17 @@ resource "kubernetes_cron_job_v1" "mongodb_backup" {
         template {
           spec {
             container {
-              name            = "mongodump-gcs-cron"
-              image           = "openrm/mongodump-gcs:latest"
+              name            = "pgdump-gcs-cron"
+              image           = "openrm/pgdump-gcs:latest"
               env = {
                 name = GCS_BUCKET
                 value = "backup_bucket_name"
               }
               env = {
-                name = MONGO_URI
+                name = POSTGRESQL_URI
                 value_from {
                   secret_key_ref {
-                    name = "mongodb"
+                    name = "postgresql"
                     key  = "uri"
                   }
                 }
