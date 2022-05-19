@@ -1,4 +1,5 @@
 #!/bin/bash
+set -eu
 
 filename=$(date +'%Y%m%d-%H%M')-$RANDOM.gz
 
