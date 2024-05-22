@@ -1,4 +1,4 @@
-FROM postgres:latest
+FROM postgres:10.23-bullseye
 MAINTAINER Open Room Inc. <tech@openrm.co.jp>
 
 RUN apt-get update && \
