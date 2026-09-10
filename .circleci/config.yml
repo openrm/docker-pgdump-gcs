@@ -1,0 +1,76 @@
+push_container: &push_container
+  docker:
+    - image: openrm/google-cloud-cli:alpine
+  steps:
+    - checkout
+    - run:
+        name: Setup Google Cloud SDK
+        command: |
+          echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+          gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
+          gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+    - setup_remote_docker
+    - run:
+        name: Capture Tag Value
+        command: |
+          if [ -z "$CIRCLE_TAG" ]; then
+            echo "export DOCKER_TAG=$CIRCLE_SHA1" >> $BASH_ENV
+          else
+            echo "export DOCKER_TAG=$CIRCLE_TAG" >> $BASH_ENV
+          fi
+    - run:
+        name: Docker build
+        command: |
+          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+          docker build -t $name .
+    - run:
+        name: Install Trivy
+        command: |
+          apk add --no-cache curl
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.74.0
+    - run:
+        name: Trivy scan (fail on CRITICAL/HIGH)
+        environment:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
+        command: |
+          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignorefile .trivyignore --ignore-unfixed $name
+    - run:
+        name: Docker push
+        command: |
+          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+          for location in $CONTAINER_MIRRORS; do
+            server=${location}-docker.pkg.dev
+            repository=${server}/${CONTAINER_PROJECT}/${CONTAINER_REPOSITORY}
+            docker tag $name $repository/$name:${DOCKER_TAG}
+            docker tag $name $repository/$name:latest
+            gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://$server
+            docker push $repository/$name:${DOCKER_TAG}
+            docker push $repository/$name:latest
+          done
+
+version: 2.1
+jobs:
+  push_container-dev:
+    <<: *push_container
+  push_container-prod:
+    <<: *push_container
+
+workflows:
+  version: 2
+  workflow:
+    jobs:
+      - push_container-dev:
+          context: gcp_staging
+          filters:
+            branches:
+              only: master
+      - push_container-prod:
+          context: gcp
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/

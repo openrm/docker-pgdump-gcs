@@ -40,10 +40,12 @@ jobs:
           ignore-unfixed: true
           trivyignores: .trivyignore
 
-      # This repo has no publish step at all yet - see the PR description.
-      # Uploading requires GitHub Advanced Security ("Code security") to be
-      # enabled for the org/repo, so this is skipped until
-      # vars.CODE_SCANNING_ENABLED is "true".
+      # CircleCI's push_container jobs own the actual publish on push to
+      # master/tag; this job only rebuilds+scans weekly to catch new CVEs
+      # surfacing in the base image between commits. Uploading requires
+      # GitHub Advanced Security ("Code security") to be enabled for the
+      # org/repo, so this is skipped until vars.CODE_SCANNING_ENABLED is
+      # "true".
       - name: Trivy scan (SARIF, for Security tab)
         if: always() && vars.CODE_SCANNING_ENABLED == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
