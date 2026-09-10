@@ -36,3 +36,12 @@ CVE-2026-56862 exp:2026-10-08 # stdlib
 # Debian trixie's openssl 3.5.6 package, fixed in 3.5.7, not yet rebuilt
 # into this image tag.
 CVE-2026-14456 exp:2026-10-08 # openssl/libssl3t64
+
+# Bundled with the google-cloud-cli apt package this Dockerfile installs
+# (for gsutil) - Python cryptography/msgpack/setuptools, all fixed
+# upstream but not yet bumped in the google-cloud-cli package itself.
+CVE-2025-47273 exp:2026-10-08 # setuptools
+CVE-2026-69247 exp:2026-10-08 # cryptography
+CVE-2026-69249 exp:2026-10-08 # cryptography
+GHSA-537c-gmf6-5ccf exp:2026-10-08 # cryptography
+GHSA-6v7p-g79w-8964 exp:2026-10-08 # msgpack
