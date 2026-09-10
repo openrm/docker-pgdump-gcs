@@ -1,0 +1,67 @@
+name: Weekly image build & scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1' # weekly, Monday 03:00 UTC
+
+permissions:
+  actions: read # required by upload-sarif to look up the workflow run on private repos
+  contents: read
+  security-events: write
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: openrm/pgdump-gcs:latest
+
+      - name: Trivy scan (fail on findings)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
+        with:
+          image-ref: openrm/pgdump-gcs:latest
+          scan-type: image
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      # This repo has no publish step at all yet - see the PR description.
+      # Uploading requires GitHub Advanced Security ("Code security") to be
+      # enabled for the org/repo, so this is skipped until
+      # vars.CODE_SCANNING_ENABLED is "true".
+      - name: Trivy scan (SARIF, for Security tab)
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
+        with:
+          image-ref: openrm/pgdump-gcs:latest
+          scan-type: image
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      - name: Upload SARIF to Security tab
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true'
+        uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
+        with:
+          sarif_file: trivy-results.sarif
