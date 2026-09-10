@@ -1,4 +1,4 @@
-name: Weekly image build & scan
+name: Weekly image build, scan & push
 
 on:
   workflow_dispatch:
@@ -11,13 +11,19 @@ permissions:
   security-events: write
 
 jobs:
-  build-and-scan:
+  build-scan-push:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build image (local)
         uses: docker/build-push-action@v5
@@ -40,12 +46,13 @@ jobs:
           ignore-unfixed: true
           trivyignores: .trivyignore
 
-      # CircleCI's push_container jobs own the actual publish on push to
-      # master/tag; this job only rebuilds+scans weekly to catch new CVEs
-      # surfacing in the base image between commits. Uploading requires
-      # GitHub Advanced Security ("Code security") to be enabled for the
-      # org/repo, so this is skipped until vars.CODE_SCANNING_ENABLED is
-      # "true".
+      # CircleCI's push_container jobs already publish to Artifact Registry
+      # on push to master/tag; this job additionally rebuilds+scans+pushes
+      # to Docker Hub weekly, both to catch new CVEs surfacing in the base
+      # image between commits and to keep the Docker Hub tag fresh.
+      # Uploading requires GitHub Advanced Security ("Code security") to be
+      # enabled for the org/repo, so this is skipped until
+      # vars.CODE_SCANNING_ENABLED is "true".
       - name: Trivy scan (SARIF, for Security tab)
         if: always() && vars.CODE_SCANNING_ENABLED == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -67,3 +74,6 @@ jobs:
         uses: github/codeql-action/upload-sarif@4bd7200e1f146b1c937cae12d258b50f41a53cf8 # v4.38.0
         with:
           sarif_file: trivy-results.sarif
+
+      - name: Push image to Docker Hub
+        run: docker push openrm/pgdump-gcs:latest
