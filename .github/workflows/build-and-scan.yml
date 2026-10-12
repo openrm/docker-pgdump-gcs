@@ -25,26 +25,71 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      # Keep a handle on whatever is live now, so the new build can be
+      # judged against it rather than against a zero-findings bar. If the
+      # pull fails (first run, Docker Hub outage) there is no baseline and
+      # the gate below falls back to "no CRITICAL/HIGH findings at all".
+      - name: Pull currently published image
+        id: published
+        run: |
+          if docker pull openrm/pgdump-gcs:latest; then
+            docker tag openrm/pgdump-gcs:latest openrm/pgdump-gcs:published
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build image (local)
         uses: docker/build-push-action@v5
         with:
           context: .
           push: false
           load: true
-          tags: openrm/pgdump-gcs:latest
+          tags: openrm/pgdump-gcs:candidate
 
-      - name: Trivy scan (fail on findings)
+      - name: Trivy scan candidate (JSON)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
           TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
         with:
-          image-ref: openrm/pgdump-gcs:latest
+          image-ref: openrm/pgdump-gcs:candidate
           scan-type: image
           severity: CRITICAL,HIGH
-          exit-code: "1"
+          format: json
+          output: candidate.json
+          exit-code: "0"
           ignore-unfixed: true
-          trivyignores: .trivyignore
+
+      - name: Trivy scan published (JSON)
+        if: steps.published.outputs.exists == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
+        with:
+          image-ref: openrm/pgdump-gcs:published
+          scan-type: image
+          severity: CRITICAL,HIGH
+          format: json
+          output: published.json
+          exit-code: "0"
+          ignore-unfixed: true
+
+      # Gate on regressions only: fail if the candidate has a fixable
+      # CRITICAL/HIGH finding that the live image does not. Findings the
+      # live image already has can't make a rebuild worse, so they must not
+      # block it from shipping (it may well carry fixes for others).
+      - name: Fail on new CRITICAL/HIGH findings
+        run: |
+          ids() { jq -r '[.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.PkgName)"] | unique[]' "$1"; }
+          ids candidate.json > candidate.ids
+          if [ -f published.json ]; then ids published.json > published.ids; else : > published.ids; fi
+          comm -13 published.ids candidate.ids > new.ids
+          echo "Findings in candidate: $(wc -l < candidate.ids), in published: $(wc -l < published.ids)"
+          if [ -s new.ids ]; then
+            echo "::error::Candidate introduces new CRITICAL/HIGH findings:"
+            cat new.ids
+            exit 1
+          fi
 
       # CircleCI's push_container jobs already publish to Artifact Registry
       # on push to master/tag; this job additionally rebuilds+scans+pushes
@@ -52,7 +97,8 @@ jobs:
       # image between commits and to keep the Docker Hub tag fresh.
       # Uploading requires GitHub Advanced Security ("Code security") to be
       # enabled for the org/repo, so this is skipped until
-      # vars.CODE_SCANNING_ENABLED is "true".
+      # vars.CODE_SCANNING_ENABLED is "true". This report is informational
+      # (all known findings, not just regressions) and never blocks.
       - name: Trivy scan (SARIF, for Security tab)
         if: always() && vars.CODE_SCANNING_ENABLED == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -60,14 +106,13 @@ jobs:
           TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
           TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
         with:
-          image-ref: openrm/pgdump-gcs:latest
+          image-ref: openrm/pgdump-gcs:candidate
           scan-type: image
           severity: CRITICAL,HIGH
           format: sarif
           output: trivy-results.sarif
           exit-code: "0"
           ignore-unfixed: true
-          trivyignores: .trivyignore
 
       - name: Upload SARIF to Security tab
         if: always() && vars.CODE_SCANNING_ENABLED == 'true'
@@ -76,4 +121,6 @@ jobs:
           sarif_file: trivy-results.sarif
 
       - name: Push image to Docker Hub
-        run: docker push openrm/pgdump-gcs:latest
+        run: |
+          docker tag openrm/pgdump-gcs:candidate openrm/pgdump-gcs:latest
+          docker push openrm/pgdump-gcs:latest
