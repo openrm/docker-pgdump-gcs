@@ -6,6 +6,10 @@ RUN apt-get update && \
 
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
 
+# gosu (a Go binary with an old stdlib) only serves the base image's entrypoint,
+# which the ENTRYPOINT below replaces, so it is dead weight with 26 stdlib CVEs.
+RUN rm -f /usr/local/bin/gosu
+
 WORKDIR /openrm
 
 RUN mkdir /backups
