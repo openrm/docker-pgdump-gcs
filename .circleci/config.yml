@@ -1,76 +1,69 @@
-push_container: &push_container
-  docker:
-    - image: openrm/google-cloud-cli:alpine
-  steps:
-    - checkout
-    - run:
-        name: Setup Google Cloud SDK
-        command: |
-          echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
-          gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
-          gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
-    - setup_remote_docker
-    - run:
-        name: Capture Tag Value
-        command: |
-          if [ -z "$CIRCLE_TAG" ]; then
-            echo "export DOCKER_TAG=$CIRCLE_SHA1" >> $BASH_ENV
-          else
-            echo "export DOCKER_TAG=$CIRCLE_TAG" >> $BASH_ENV
-          fi
-    - run:
-        name: Docker build
-        command: |
-          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
-          docker build -t $name .
-    - run:
-        name: Install Trivy
-        command: |
-          apk add --no-cache curl
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.74.0
-    - run:
-        name: Trivy scan (fail on CRITICAL/HIGH)
-        environment:
-          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
-          TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
-        command: |
-          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignorefile .trivyignore --ignore-unfixed $name
-    - run:
-        name: Docker push
-        command: |
-          name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
-          for location in $CONTAINER_MIRRORS; do
-            server=${location}-docker.pkg.dev
-            repository=${server}/${CONTAINER_PROJECT}/${CONTAINER_REPOSITORY}
-            docker tag $name $repository/$name:${DOCKER_TAG}
-            docker tag $name $repository/$name:latest
-            gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://$server
-            docker push $repository/$name:${DOCKER_TAG}
-            docker push $repository/$name:latest
-          done
-
 version: 2.1
 jobs:
-  push_container-dev:
-    <<: *push_container
-  push_container-prod:
-    <<: *push_container
+  push_container:
+    docker:
+      - image: openrm/google-cloud-cli:alpine
+    steps:
+      - checkout
+      - run:
+          name: Setup Google Cloud SDK
+          command: |
+            # Keyless: exchange the job's OIDC token for short-lived credentials of the CircleCI service account.
+            # The OIDC_* variables come from the gcp_production context (infra-forest-catalog docs/circleci-oidc.md).
+            for v in GOOGLE_PROJECT_NUMBER OIDC_WIP_ID OIDC_WIP_PROVIDER_ID OIDC_SERVICE_ACCOUNT_EMAIL CIRCLE_OIDC_TOKEN; do
+              eval "[ -n \"\${$v}\" ]" || { echo "$v is empty: the job's context needs the OIDC variables (and must be attached to the job)" >&2; exit 1; }
+            done
+            echo $CIRCLE_OIDC_TOKEN > ${HOME}/oidc-token.txt
+            gcloud iam workload-identity-pools create-cred-config \
+              projects/${GOOGLE_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${OIDC_WIP_ID}/providers/${OIDC_WIP_PROVIDER_ID} \
+              --service-account=${OIDC_SERVICE_ACCOUNT_EMAIL} \
+              --credential-source-file=${HOME}/oidc-token.txt \
+              --output-file=${HOME}/gcp_cred_config.json
+            gcloud auth login --brief --cred-file=${HOME}/gcp_cred_config.json
+            echo "export GOOGLE_APPLICATION_CREDENTIALS=${HOME}/gcp_cred_config.json" >> $BASH_ENV
+            gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
+      - setup_remote_docker
+      - run:
+          name: Docker build
+          command: |
+            name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+            docker build -t $name .
+      - run:
+          name: Install Trivy
+          command: |
+            apk add --no-cache curl
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b /usr/local/bin v0.74.0
+      - run:
+          name: Trivy scan (fail on CRITICAL/HIGH)
+          environment:
+            TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+            TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db
+          command: |
+            name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+            trivy image --severity CRITICAL,HIGH --exit-code 1 --ignorefile .trivyignore --ignore-unfixed $name
+      - run:
+          name: Docker push
+          command: |
+            name=openrm/$(echo ${CIRCLE_PROJECT_REPONAME} | sed -e s/docker-//)
+            for location in $CONTAINER_MIRRORS; do
+              server=${location}-docker.pkg.dev
+              repository=${server}/${CONTAINER_PROJECT}/${CONTAINER_REPOSITORY}
+              docker tag $name $repository/$name:${CIRCLE_SHA1}
+              docker tag $name $repository/$name:latest
+              gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin https://$server
+              docker push $repository/$name:${CIRCLE_SHA1}
+              docker push $repository/$name:latest
+            done
 
 workflows:
   version: 2
   workflow:
     jobs:
-      - push_container-dev:
-          context: gcp_staging
-          filters:
-            branches:
-              only: master
-      - push_container-prod:
-          context: gcp
-          filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore: /.*/
+    - push_container:
+        context: gcp_production
+        filters:
+          branches:
+            only:
+              - master
+              - /^deploy\/.*/
